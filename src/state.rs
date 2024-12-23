@@ -1,4 +1,4 @@
-use std::iter;
+use std::{iter, time::Duration};
 
 use crate::{
     camera::{Camera, CameraController, CameraUniform},
@@ -28,6 +28,8 @@ pub struct State<'a> {
     pub instance_buffer: wgpu::Buffer,
     pub depth_texture: texture::Texture,
     pub window: &'a Window,
+
+    last_time: Option<Duration>, // used to calc time difference and apply physics
 }
 
 impl<'a> State<'a> {
@@ -97,6 +99,7 @@ impl<'a> State<'a> {
             instance_buffer,
             depth_texture,
             window,
+            last_time: None,
         }
     }
 
@@ -119,7 +122,7 @@ impl<'a> State<'a> {
         self.camera.controller.process_events(event)
     }
 
-    pub fn update(&mut self) {
+    pub fn update(&mut self, time: Duration) {
         self.camera
             .controller
             .update_camera(&mut self.camera.camera);
@@ -132,17 +135,30 @@ impl<'a> State<'a> {
             bytemuck::cast_slice(&[self.camera.uniform]),
         );
 
-        self.move_instances();
+        self.move_instances(time);
     }
 
-    fn move_instances(&mut self) {
-        // just some arbitrary motion
-        for instance in self.instances.iter_mut() {
-            instance.position += Vector3::new(-0.01, 0., 0.);
+    fn move_instances(&mut self, time: Duration) {
+        match self.last_time {
+            Some(last_time) => {
+                let time_delta = time - last_time;
+                self.move_instances_with_time_delta(time_delta)
+            }
+            None => {}
         }
+        self.last_time = Some(time);
+    }
+
+    fn move_instances_with_time_delta(&mut self, time_delta: Duration) {
+        // just some arbitrary motion
+
+        for instance in self.instances.iter_mut() {
+            instance.velocity = Vector3::new(-1., 0., 0.);
+            instance.update_physics(time_delta);
+        }
+
         self.on_instances_updated();
     }
-
     /// updates instance buffer to reflect instances
     fn on_instances_updated(&mut self) {
         let instance_data: Vec<InstanceRaw> = self
@@ -406,7 +422,11 @@ fn create_instances() -> Vec<Instance> {
                     cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
                 };
 
-                Instance { position, rotation }
+                Instance {
+                    position,
+                    rotation,
+                    velocity: Vector3::zero(),
+                }
             })
         })
         .collect::<Vec<_>>()

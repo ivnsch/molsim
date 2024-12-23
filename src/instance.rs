@@ -1,5 +1,9 @@
+use std::time::Duration;
+
+#[derive(Debug, Clone)]
 pub struct Instance {
     pub position: cgmath::Vector3<f32>,
+    pub velocity: cgmath::Vector3<f32>,
     pub rotation: cgmath::Quaternion<f32>,
 }
 
@@ -10,6 +14,11 @@ impl Instance {
                 * cgmath::Matrix4::from(self.rotation))
             .into(),
         }
+    }
+
+    pub fn update_physics(&mut self, delta_time: Duration) {
+        let position = self.position + self.velocity * delta_time.as_secs_f32();
+        self.position = position;
     }
 }
 

@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use state::State;
 use winit::{
     event::*,
@@ -94,8 +96,12 @@ pub async fn run() {
                                 if !surface_configured {
                                     return;
                                 }
+                                let start = SystemTime::now();
+                                let since_epoch = start
+                                    .duration_since(UNIX_EPOCH)
+                                    .expect("Time went backwards");
 
-                                state.update();
+                                state.update(since_epoch);
                                 match state.render() {
                                     Ok(_) => {}
                                     // Reconfigure the surface if it's lost or outdated
