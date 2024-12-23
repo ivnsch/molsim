@@ -4,6 +4,7 @@ use std::time::Duration;
 pub struct Instance {
     pub position: cgmath::Vector3<f32>,
     pub velocity: cgmath::Vector3<f32>,
+    pub acceleration: cgmath::Vector3<f32>,
     pub rotation: cgmath::Quaternion<f32>,
 }
 
@@ -17,6 +18,9 @@ impl Instance {
     }
 
     pub fn update_physics(&mut self, delta_time: Duration) {
+        let velocity = self.velocity + self.acceleration * delta_time.as_secs_f32();
+        self.velocity = velocity;
+
         let position = self.position + self.velocity * delta_time.as_secs_f32();
         self.position = position;
     }

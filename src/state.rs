@@ -157,12 +157,8 @@ impl<'a> State<'a> {
         for instance in self.instances.iter_mut() {
             for instance2 in &clone {
                 let force = calc_lennard_jones_force(instance.position, instance2.position);
-
                 let mass: f32 = 1.;
-                let acceleration = force / mass;
-                let velocity = instance.velocity + acceleration * time_delta.as_secs_f32();
-
-                instance.velocity = velocity;
+                instance.acceleration = force / mass;
                 instance.update_physics(time_delta);
             }
         }
@@ -437,6 +433,7 @@ fn create_instances() -> Vec<Instance> {
                     position,
                     rotation,
                     velocity: Vector3::zero(),
+                    acceleration: Vector3::zero(),
                 }
             })
         })
