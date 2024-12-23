@@ -155,12 +155,13 @@ impl<'a> State<'a> {
         // TODO more performant way to do nested loop with mutability
         let clone = self.instances.clone();
         for instance in self.instances.iter_mut() {
+            let mut total_force = Vector3::zero();
+            let mass: f32 = 1.;
             for instance2 in &clone {
-                let force = calc_lennard_jones_force(instance.position, instance2.position);
-                let mass: f32 = 1.;
-                instance.acceleration = force / mass;
-                instance.update_physics(time_delta);
+                total_force += calc_lennard_jones_force(instance.position, instance2.position);
             }
+            instance.acceleration = total_force / mass;
+            instance.update_physics(time_delta);
         }
 
         self.on_instances_updated();
