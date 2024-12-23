@@ -2,11 +2,11 @@ use std::iter;
 
 use crate::{
     camera::{Camera, CameraController, CameraUniform},
-    instance::{Instance, InstanceRaw, NUM_INSTANCES_PER_ROW},
+    instance::{Instance, InstanceRaw},
     model::{self, DrawModel, Vertex},
     resources, texture,
 };
-use cgmath::prelude::*;
+use cgmath::{prelude::*, Vector3};
 use wgpu::{
     util::DeviceExt, Adapter, BindGroup, BindGroupLayout, Buffer, Device, Queue,
     RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPipeline, ShaderModule,
@@ -51,7 +51,8 @@ impl<'a> State<'a> {
         let camera = create_camera_deps(&device, &config);
 
         let instances = create_instances();
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance_data: Vec<InstanceRaw> =
+            instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
             contents: bytemuck::cast_slice(&instance_data),
@@ -130,6 +131,33 @@ impl<'a> State<'a> {
             0,
             bytemuck::cast_slice(&[self.camera.uniform]),
         );
+
+        self.move_instances();
+    }
+
+    fn move_instances(&mut self) {
+        // just some arbitrary motion
+        for instance in self.instances.iter_mut() {
+            instance.position += Vector3::new(-0.01, 0., 0.);
+        }
+        self.on_instances_updated();
+    }
+
+    /// updates instance buffer to reflect instances
+    fn on_instances_updated(&mut self) {
+        let instance_data: Vec<InstanceRaw> = self
+            .instances
+            .iter()
+            .map(Instance::to_raw)
+            .collect::<Vec<_>>();
+        let instance_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Instance Buffer"),
+                contents: bytemuck::cast_slice(&instance_data),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        self.instance_buffer = instance_buffer;
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
