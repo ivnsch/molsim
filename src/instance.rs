@@ -1,5 +1,3 @@
-pub const NUM_INSTANCES_PER_ROW: u32 = 10;
-
 pub struct Instance {
     pub position: cgmath::Vector3<f32>,
     pub rotation: cgmath::Quaternion<f32>,

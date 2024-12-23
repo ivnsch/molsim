@@ -361,6 +361,7 @@ fn create_camera_deps(device: &Device, config: &SurfaceConfiguration) -> CameraD
 }
 
 fn create_instances() -> Vec<Instance> {
+    const NUM_INSTANCES_PER_ROW: u32 = 10;
     const SPACE_BETWEEN: f32 = 3.0;
 
     (0..NUM_INSTANCES_PER_ROW)
