@@ -361,7 +361,7 @@ pub struct CameraDeps {
 
 fn create_camera_deps(device: &Device, config: &SurfaceConfiguration) -> CameraDeps {
     let camera = Camera {
-        eye: (0.0, 5.0, -10.0).into(),
+        eye: (0.0, 15.0, -30.0).into(),
         target: (0.0, 0.0, 0.0).into(),
         up: cgmath::Vector3::unit_y(),
         aspect: config.width as f32 / config.height as f32,
@@ -414,7 +414,7 @@ fn create_camera_deps(device: &Device, config: &SurfaceConfiguration) -> CameraD
 }
 
 fn create_instances() -> Vec<Instance> {
-    const NUM_INSTANCES_PER_ROW: u32 = 10;
+    const NUM_INSTANCES_PER_ROW: u32 = 40;
     const SPACE_BETWEEN: f32 = 3.0;
 
     (0..NUM_INSTANCES_PER_ROW)
