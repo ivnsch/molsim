@@ -152,13 +152,24 @@ impl<'a> State<'a> {
     fn move_instances_with_time_delta(&mut self, time_delta: Duration) {
         // just some arbitrary motion
 
+        // TODO more performant way to do nested loop with mutability
+        let clone = self.instances.clone();
         for instance in self.instances.iter_mut() {
-            instance.velocity = Vector3::new(-1., 0., 0.);
-            instance.update_physics(time_delta);
+            for instance2 in &clone {
+                let force = calc_lennard_jones_force(instance.position, instance2.position);
+
+                let mass: f32 = 1.;
+                let acceleration = force / mass;
+                let velocity = instance.velocity + acceleration * time_delta.as_secs_f32();
+
+                instance.velocity = velocity;
+                instance.update_physics(time_delta);
+            }
         }
 
         self.on_instances_updated();
     }
+
     /// updates instance buffer to reflect instances
     fn on_instances_updated(&mut self) {
         let instance_data: Vec<InstanceRaw> = self
@@ -491,4 +502,75 @@ fn create_render_pipeline(
         // Useful for optimizing shader compilation on Android
         cache: None,
     })
+}
+
+// used in test
+#[allow(unused)]
+fn calc_lennard_jones_potential(sigma: f32, epsilon: f32, distance: f32) -> f32 {
+    let fraction = sigma / distance;
+    4. * epsilon * (fraction.powi(12) - fraction.powi(6))
+}
+
+fn calc_lennard_jones_potential_derivative(sigma: f32, epsilon: f32, distance: f32) -> f32 {
+    let fraction = sigma / distance;
+    24. * epsilon / distance * (fraction.powi(6) - 2. * fraction.powi(12))
+}
+
+fn calc_lennard_jones_force(pos1: Vector3<f32>, pos2: Vector3<f32>) -> Vector3<f32> {
+    let sigma = 2.5;
+    let epsilon = 0.001; // eV
+
+    let distance = pos1.distance(pos2);
+    if distance.round() == 0.0 {
+        return Vector3::zero(); // avoid division by zero
+    }
+
+    // -1 is correct, but particles just keep drifting apart with it, while 1 causes more expected attraction/repulsion behavior
+    // something is wrong elsewhere?
+    // let force_magnitude = -1. * calc_lennard_jones_potential_derivative(sigma, epsilon, distance);
+    let force_magnitude = 1. * calc_lennard_jones_potential_derivative(sigma, epsilon, distance);
+
+    if force_magnitude.is_nan() || force_magnitude.is_infinite() {
+        return Vector3::zero();
+    }
+
+    let direction = (pos2 - pos1).normalize();
+
+    direction * force_magnitude
+}
+
+#[cfg(test)]
+mod test {
+    use cgmath::{MetricSpace, Vector3};
+
+    use crate::state::calc_lennard_jones_potential;
+
+    use super::calc_lennard_jones_force;
+
+    // to get an idea of magnitudes
+    #[test]
+    fn print_lennard_jones_potential_at_different_distances() {
+        let pos1 = Vector3::new(0., 0., 0.);
+
+        let positions2 = vec![
+            Vector3::new(7., 0., 0.),  // -7.085309e-6
+            Vector3::new(4., 0., 0.),  // -0.0003
+            Vector3::new(2., 0., 0.),  // 0.30
+            Vector3::new(1., 0., 0.),  // 2855
+            Vector3::new(0.5, 0., 0.), // 23436750
+        ];
+
+        let sigma = 2.5;
+        let epsilon = 0.001; // eV
+
+        for pos2 in positions2 {
+            let distance = pos1.distance(pos2);
+            let potential = calc_lennard_jones_potential(sigma, epsilon, distance);
+            let force = calc_lennard_jones_force(pos1, pos2);
+            println!(
+                "distance: {:?}, potential: {:?}, force: {:?}",
+                distance, potential, force
+            );
+        }
+    }
 }
