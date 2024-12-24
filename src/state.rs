@@ -4,7 +4,7 @@ use crate::{
     camera::{Camera, CameraController, CameraUniform},
     instance::{Instance, InstanceRaw},
     model::{self, DrawModel, Vertex},
-    mol2_parser::{Atom, Mol2AssetLoader},
+    mol2_parser::{Atom, Mol, Mol2AssetLoader},
     resources, texture,
 };
 use cgmath::{prelude::*, Vector3};
@@ -22,15 +22,18 @@ pub struct State<'a> {
     pub config: wgpu::SurfaceConfiguration,
     pub size: winit::dpi::PhysicalSize<u32>,
     pub render_pipeline: wgpu::RenderPipeline,
-    pub atom_model: model::Model,
     pub camera: CameraDeps,
-    pub atom_instances: Vec<Instance>,
-    #[allow(dead_code)]
-    pub instance_buffer: wgpu::Buffer,
     pub depth_texture: texture::Texture,
     pub window: &'a Window,
+    pub atom_instances: Instances,
 
     last_time: Option<Duration>, // used to calc time difference and apply physics
+}
+
+pub struct Instances {
+    model: model::Model,
+    instances: Vec<Instance>,
+    buffer: wgpu::Buffer,
 }
 
 impl<'a> State<'a> {
@@ -55,11 +58,6 @@ impl<'a> State<'a> {
 
         log::warn!("Load model");
 
-        let obj_model =
-            resources::load_model("sphere.obj", &device, &queue, &texture_bind_group_layout)
-                .await
-                .unwrap();
-
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader.wgsl"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -80,15 +78,9 @@ impl<'a> State<'a> {
 
         let asset_loader = Mol2AssetLoader {};
         let mol = asset_loader.read("res/benzene.mol2").await.unwrap();
-        let instances = create_instances(mol.atoms);
-        // let instances = create_instances();
-        let instance_data: Vec<InstanceRaw> =
-            instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instance_data),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+
+        let atom_instances =
+            create_atom_instances(&device, &texture_bind_group_layout, &queue, mol).await;
 
         Self {
             surface,
@@ -97,10 +89,8 @@ impl<'a> State<'a> {
             config,
             size,
             render_pipeline,
-            atom_model: obj_model,
+            atom_instances,
             camera,
-            atom_instances: instances,
-            instance_buffer,
             depth_texture,
             window,
             last_time: None,
@@ -157,8 +147,8 @@ impl<'a> State<'a> {
         // just some arbitrary motion
 
         // TODO more performant way to do nested loop with mutability
-        let clone = self.atom_instances.clone();
-        for instance in self.atom_instances.iter_mut() {
+        let clone = self.atom_instances.instances.clone();
+        for instance in self.atom_instances.instances.iter_mut() {
             let mut total_force = Vector3::zero();
             let mass: f32 = 1.;
             for instance2 in &clone {
@@ -175,6 +165,7 @@ impl<'a> State<'a> {
     fn on_instances_updated(&mut self) {
         let instance_data: Vec<InstanceRaw> = self
             .atom_instances
+            .instances
             .iter()
             .map(Instance::to_raw)
             .collect::<Vec<_>>();
@@ -185,7 +176,7 @@ impl<'a> State<'a> {
                 contents: bytemuck::cast_slice(&instance_data),
                 usage: wgpu::BufferUsages::VERTEX,
             });
-        self.instance_buffer = instance_buffer;
+        self.atom_instances.buffer = instance_buffer;
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -211,11 +202,11 @@ impl<'a> State<'a> {
                 timestamp_writes: None,
             });
 
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            render_pass.set_vertex_buffer(1, self.atom_instances.buffer.slice(..));
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.draw_model_instanced(
-                &self.atom_model,
-                0..self.atom_instances.len() as u32,
+                &self.atom_instances.model,
+                0..self.atom_instances.instances.len() as u32,
                 &self.camera.bind_group,
             );
         }
@@ -416,7 +407,48 @@ fn create_camera_deps(device: &Device, config: &SurfaceConfiguration) -> CameraD
     }
 }
 
-fn create_instances(atoms: Vec<Atom>) -> Vec<Instance> {
+async fn create_atom_instances(
+    device: &Device,
+    texture_bind_group_layout: &BindGroupLayout,
+    queue: &Queue,
+    mol: Mol,
+) -> Instances {
+    let instances = generate_instances(mol.atoms);
+    create_instances_data(
+        &device,
+        &texture_bind_group_layout,
+        &queue,
+        "sphere.obj",
+        instances,
+    )
+    .await
+}
+
+async fn create_instances_data(
+    device: &Device,
+    texture_bind_group_layout: &BindGroupLayout,
+    queue: &Queue,
+    model_file: &str,
+    instances: Vec<Instance>,
+) -> Instances {
+    let model = resources::load_model(model_file, device, queue, texture_bind_group_layout)
+        .await
+        .unwrap();
+    let instance_raw: Vec<InstanceRaw> = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+    let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Instance Buffer"),
+        contents: bytemuck::cast_slice(&instance_raw),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+
+    Instances {
+        model,
+        instances,
+        buffer: instance_buffer,
+    }
+}
+
+fn generate_instances(atoms: Vec<Atom>) -> Vec<Instance> {
     atoms
         .into_iter()
         .map(|atom| {
