@@ -164,7 +164,7 @@ impl<'a> State<'a> {
             for instance2 in &clone {
                 total_force += calc_lennard_jones_force(instance.position, instance2.position);
             }
-            // instance.acceleration = total_force / mass;
+            instance.acceleration = total_force / mass;
             instance.update_physics(time_delta);
         }
 
