@@ -438,6 +438,7 @@ fn create_instances(atoms: Vec<Atom>) -> Vec<Instance> {
                 rotation,
                 velocity: Vector3::zero(),
                 acceleration: Vector3::zero(),
+                scale: 0.3,
             }
         })
         .collect::<Vec<_>>()
