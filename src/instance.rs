@@ -1,10 +1,12 @@
 use std::time::Duration;
 
-use crate::mol2_parser::Atom;
+use crate::mol2_parser::{Atom, Bond};
 
 #[derive(Debug, Clone)]
 pub enum InstanceEntity {
     Atom(Atom),
+    #[allow(unused)]
+    Bond(Bond),
 }
 
 #[derive(Debug, Clone)]

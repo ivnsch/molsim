@@ -4,7 +4,7 @@ use crate::{
     camera::{Camera, CameraController, CameraUniform},
     instance::{Instance, InstanceEntity, InstanceRaw},
     model::{self, DrawModel, Vertex},
-    mol2_parser::{Atom, Mol, Mol2AssetLoader},
+    mol2_parser::{Atom, Bond, Mol, Mol2AssetLoader},
     resources, texture,
 };
 use cgmath::{prelude::*, Vector3};
@@ -26,6 +26,7 @@ pub struct State<'a> {
     pub depth_texture: texture::Texture,
     pub window: &'a Window,
     pub atom_instances: Instances,
+    pub bond_instances: Instances,
 
     last_time: Option<Duration>, // used to calc time difference and apply physics
 }
@@ -80,7 +81,9 @@ impl<'a> State<'a> {
         let mol = asset_loader.read("res/benzene.mol2", 1).await.unwrap();
 
         let atom_instances =
-            create_atom_instances(&device, &texture_bind_group_layout, &queue, mol).await;
+            create_atom_instances(&device, &texture_bind_group_layout, &queue, &mol).await;
+        let bond_instances =
+            create_bond_instances(&device, &texture_bind_group_layout, &queue, &mol).await;
 
         Self {
             surface,
@@ -90,6 +93,7 @@ impl<'a> State<'a> {
             size,
             render_pipeline,
             atom_instances,
+            bond_instances,
             camera,
             depth_texture,
             window,
@@ -156,6 +160,9 @@ impl<'a> State<'a> {
                     (InstanceEntity::Atom(atom1), InstanceEntity::Atom(atom2)) => {
                         atom1.mol_id != atom2.mol_id
                     }
+                    // no force between bonds
+                    (InstanceEntity::Bond(_), _) => false,
+                    (_, InstanceEntity::Bond(_)) => false,
                 };
                 if calculate_lennard_potential {
                     total_force += calc_lennard_jones_force(instance.position, instance2.position);
@@ -170,20 +177,35 @@ impl<'a> State<'a> {
 
     /// updates instance buffer to reflect instances
     fn on_instances_updated(&mut self) {
-        let instance_data: Vec<InstanceRaw> = self
+        let atoms_instance_raw: Vec<InstanceRaw> = self
             .atom_instances
             .instances
             .iter()
             .map(Instance::to_raw)
             .collect::<Vec<_>>();
-        let instance_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Instance Buffer"),
-                contents: bytemuck::cast_slice(&instance_data),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-        self.atom_instances.buffer = instance_buffer;
+        let bonds_instance_buffer =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("atoms instance Buffer"),
+                    contents: bytemuck::cast_slice(&atoms_instance_raw),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+        self.atom_instances.buffer = bonds_instance_buffer;
+
+        let bonds_instance_raw: Vec<InstanceRaw> = self
+            .bond_instances
+            .instances
+            .iter()
+            .map(Instance::to_raw)
+            .collect::<Vec<_>>();
+        let bonds_instance_buffer =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("bonds instance Buffer"),
+                    contents: bytemuck::cast_slice(&bonds_instance_raw),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+        self.bond_instances.buffer = bonds_instance_buffer;
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -214,6 +236,14 @@ impl<'a> State<'a> {
             render_pass.draw_model_instanced(
                 &self.atom_instances.model,
                 0..self.atom_instances.instances.len() as u32,
+                &self.camera.bind_group,
+            );
+
+            render_pass.set_vertex_buffer(1, self.bond_instances.buffer.slice(..));
+            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.draw_model_instanced(
+                &self.bond_instances.model,
+                0..self.bond_instances.instances.len() as u32,
                 &self.camera.bind_group,
             );
         }
@@ -418,14 +448,31 @@ async fn create_atom_instances(
     device: &Device,
     texture_bind_group_layout: &BindGroupLayout,
     queue: &Queue,
-    mol: Mol,
+    mol: &Mol,
 ) -> Instances {
-    let instances = generate_instances(mol.atoms);
+    let instances = generate_instances_atoms(&mol.atoms);
     create_instances_data(
         &device,
         &texture_bind_group_layout,
         &queue,
         "sphere.obj",
+        instances,
+    )
+    .await
+}
+
+async fn create_bond_instances(
+    device: &Device,
+    texture_bind_group_layout: &BindGroupLayout,
+    queue: &Queue,
+    mol: &Mol,
+) -> Instances {
+    let instances = generate_instances_bonds(mol);
+    create_instances_data(
+        &device,
+        &texture_bind_group_layout,
+        &queue,
+        "cylinder.obj",
         instances,
     )
     .await
@@ -455,7 +502,41 @@ async fn create_instances_data(
     }
 }
 
-fn generate_instances(atoms: Vec<Atom>) -> Vec<Instance> {
+fn generate_instances_bonds(mol: &Mol) -> Vec<Instance> {
+    let atoms = &mol.atoms;
+
+    mol.bonds
+        .iter()
+        .map(|bond| {
+            // TODO make sure this doesn't crash (e.g. corrupted file)
+            let atom1 = &atoms[bond.atom1];
+            // for now just render it at atom's pos
+            let position = cgmath::Vector3 {
+                x: atom1.x,
+                y: atom1.y,
+                z: atom1.z,
+            };
+            // println!("added atom at: {:?}", position);
+
+            let rotation = if position.is_zero() {
+                cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
+            } else {
+                cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+            };
+
+            Instance {
+                position,
+                rotation,
+                velocity: Vector3::zero(),
+                acceleration: Vector3::zero(),
+                scale: 0.3,
+                entity: InstanceEntity::Bond(bond.clone()),
+            }
+        })
+        .collect::<Vec<_>>()
+}
+
+fn generate_instances_atoms(atoms: &[Atom]) -> Vec<Instance> {
     atoms
         .into_iter()
         .map(|atom| {
@@ -478,7 +559,7 @@ fn generate_instances(atoms: Vec<Atom>) -> Vec<Instance> {
                 velocity: Vector3::zero(),
                 acceleration: Vector3::zero(),
                 scale: 0.3,
-                entity: InstanceEntity::Atom(atom),
+                entity: InstanceEntity::Atom(atom.clone()),
             }
         })
         .collect::<Vec<_>>()
