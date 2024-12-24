@@ -1,0 +1,21 @@
+# Name: benzene
+# Creating user name: tom
+# Creation time: Wed Dec 28 00:18:30 1988
+# [edit] src: https://www.structbio.vanderbilt.edu/archives/amber-archive/2007/att-1568/01-mol2_2pg_113.pdf
+# Modifying user name: tom
+# Modification time: Wed Dec 28 00:18:30 1988
+
+@<TRIPOS>MOLECULE
+basic
+12 12 1 0 0
+SMALL
+NO_CHARGES
+
+
+@<TRIPOS>ATOM
+1 C1 1 0 0.000 C.ar 1 BENZENE0.000
+2 C2 -1 0 0.000 C.ar 1 BENZENE0.000
+@<TRIPOS>BOND
+1 1 2 ar
+@<TRIPOS>SUBSTRUCTURE
+1 BENZENE1 PERM 0 **** **** 0 ROOT

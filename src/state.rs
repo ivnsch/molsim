@@ -78,7 +78,7 @@ impl<'a> State<'a> {
             create_render_pipeline(&device, render_pipeline_layout, shader, &config);
 
         let asset_loader = Mol2AssetLoader {};
-        let mol = asset_loader.read("res/benzene.mol2", 1).await.unwrap();
+        let mol = asset_loader.read("res/basic.mol2", 1).await.unwrap();
 
         let atom_instances =
             create_atom_instances(&device, &texture_bind_group_layout, &queue, &mol).await;
