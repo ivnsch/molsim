@@ -80,7 +80,7 @@ impl<'a> State<'a> {
 
         let asset_loader = Mol2AssetLoader {};
         let mol = asset_loader.read("res/benzene.mol2").await.unwrap();
-        let instances = create_instances_for_atoms(mol.atoms);
+        let instances = create_instances(mol.atoms);
         // let instances = create_instances();
         let instance_data: Vec<InstanceRaw> =
             instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
@@ -416,37 +416,7 @@ fn create_camera_deps(device: &Device, config: &SurfaceConfiguration) -> CameraD
     }
 }
 
-fn create_instances() -> Vec<Instance> {
-    const NUM_INSTANCES_PER_ROW: u32 = 2;
-    const SPACE_BETWEEN: f32 = 3.0;
-
-    (0..NUM_INSTANCES_PER_ROW)
-        .flat_map(|z| {
-            (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-
-                let position = cgmath::Vector3 { x, y: 0.0, z };
-                println!("added atom at: {:?}", position);
-
-                let rotation = if position.is_zero() {
-                    cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
-                } else {
-                    cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                };
-
-                Instance {
-                    position,
-                    rotation,
-                    velocity: Vector3::zero(),
-                    acceleration: Vector3::zero(),
-                }
-            })
-        })
-        .collect::<Vec<_>>()
-}
-
-fn create_instances_for_atoms(atoms: Vec<Atom>) -> Vec<Instance> {
+fn create_instances(atoms: Vec<Atom>) -> Vec<Instance> {
     atoms
         .into_iter()
         .map(|atom| {
