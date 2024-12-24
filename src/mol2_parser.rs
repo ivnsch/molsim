@@ -10,9 +10,9 @@ use crate::element::Element;
 pub struct Mol2AssetLoader;
 
 impl Mol2AssetLoader {
-    pub async fn read(&self, path: &str) -> Result<Mol> {
+    pub async fn read(&self, path: &str, mol_id: u32) -> Result<Mol> {
         let file = File::open(path)?;
-        let mut buf_reader = BufReader::new(file);
+        let buf_reader = BufReader::new(file);
 
         let mut parsing_atoms = false;
         let mut parsing_bonds = false;
@@ -55,7 +55,7 @@ impl Mol2AssetLoader {
                 // assumption: &parts has correct length for respective handlers
                 ProcessMol2LineResult::Entity { parts } => {
                     if parsing_atoms {
-                        let atom = parse_atom_line(&parts)?;
+                        let atom = parse_atom_line(mol_id, &parts)?;
                         atoms.push(atom);
                     } else if parsing_bonds {
                         let bond = parse_bond_line(&parts)?;
@@ -82,6 +82,7 @@ impl Mol2AssetLoader {
             name: mol_name,
             atoms,
             bonds,
+            id: mol_id,
         };
         Ok(mol)
     }
@@ -128,7 +129,7 @@ fn parse_mol2_line(line: &str) -> ProcessMol2LineResult {
     ProcessMol2LineResult::Entity { parts }
 }
 
-fn parse_atom_line(parts: &[&str]) -> Result<Atom> {
+fn parse_atom_line(mol_id: u32, parts: &[&str]) -> Result<Atom> {
     let type_ = parts[5];
     Ok(Atom {
         id: parts[0].parse()?,
@@ -140,6 +141,7 @@ fn parse_atom_line(parts: &[&str]) -> Result<Atom> {
         type_: type_.to_string(),
         bond_count: parts[6].parse()?,
         mol_name: parts[7].to_string(),
+        mol_id,
     })
 }
 
@@ -181,6 +183,7 @@ fn parse_mol_name_line(parts: &[&str]) -> Result<String> {
 // TODO performance: remove clone from these
 #[derive(Default, Debug, Clone)]
 pub struct Mol {
+    pub id: u32,
     pub name: String,
     pub atoms: Vec<Atom>,
     pub bonds: Vec<Bond>,
@@ -198,6 +201,7 @@ pub struct Atom {
     pub bond_count: i32,
     pub mol_name: String,
     pub element: Element,
+    pub mol_id: u32,
 }
 
 // impl Mol2Atom {

@@ -1,5 +1,12 @@
 use std::time::Duration;
 
+use crate::mol2_parser::Atom;
+
+#[derive(Debug, Clone)]
+pub enum InstanceEntity {
+    Atom(Atom),
+}
+
 #[derive(Debug, Clone)]
 pub struct Instance {
     pub position: cgmath::Vector3<f32>,
@@ -7,6 +14,8 @@ pub struct Instance {
     pub velocity: cgmath::Vector3<f32>,
     pub acceleration: cgmath::Vector3<f32>,
     pub rotation: cgmath::Quaternion<f32>,
+
+    pub entity: InstanceEntity,
 }
 
 impl Instance {

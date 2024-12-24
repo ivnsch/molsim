@@ -2,7 +2,7 @@ use std::{iter, time::Duration};
 
 use crate::{
     camera::{Camera, CameraController, CameraUniform},
-    instance::{Instance, InstanceRaw},
+    instance::{Instance, InstanceEntity, InstanceRaw},
     model::{self, DrawModel, Vertex},
     mol2_parser::{Atom, Mol, Mol2AssetLoader},
     resources, texture,
@@ -77,7 +77,7 @@ impl<'a> State<'a> {
             create_render_pipeline(&device, render_pipeline_layout, shader, &config);
 
         let asset_loader = Mol2AssetLoader {};
-        let mol = asset_loader.read("res/benzene.mol2").await.unwrap();
+        let mol = asset_loader.read("res/benzene.mol2", 1).await.unwrap();
 
         let atom_instances =
             create_atom_instances(&device, &texture_bind_group_layout, &queue, mol).await;
@@ -152,7 +152,14 @@ impl<'a> State<'a> {
             let mut total_force = Vector3::zero();
             let mass: f32 = 1.;
             for instance2 in &clone {
-                total_force += calc_lennard_jones_force(instance.position, instance2.position);
+                let calculate_lennard_potential = match (&instance.entity, &instance2.entity) {
+                    (InstanceEntity::Atom(atom1), InstanceEntity::Atom(atom2)) => {
+                        atom1.mol_id != atom2.mol_id
+                    }
+                };
+                if calculate_lennard_potential {
+                    total_force += calc_lennard_jones_force(instance.position, instance2.position);
+                }
             }
             instance.acceleration = total_force / mass;
             instance.update_physics(time_delta);
@@ -471,6 +478,7 @@ fn generate_instances(atoms: Vec<Atom>) -> Vec<Instance> {
                 velocity: Vector3::zero(),
                 acceleration: Vector3::zero(),
                 scale: 0.3,
+                entity: InstanceEntity::Atom(atom),
             }
         })
         .collect::<Vec<_>>()
