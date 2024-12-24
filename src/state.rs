@@ -22,9 +22,9 @@ pub struct State<'a> {
     pub config: wgpu::SurfaceConfiguration,
     pub size: winit::dpi::PhysicalSize<u32>,
     pub render_pipeline: wgpu::RenderPipeline,
-    pub obj_model: model::Model,
+    pub atom_model: model::Model,
     pub camera: CameraDeps,
-    pub instances: Vec<Instance>,
+    pub atom_instances: Vec<Instance>,
     #[allow(dead_code)]
     pub instance_buffer: wgpu::Buffer,
     pub depth_texture: texture::Texture,
@@ -97,9 +97,9 @@ impl<'a> State<'a> {
             config,
             size,
             render_pipeline,
-            obj_model,
+            atom_model: obj_model,
             camera,
-            instances,
+            atom_instances: instances,
             instance_buffer,
             depth_texture,
             window,
@@ -157,14 +157,14 @@ impl<'a> State<'a> {
         // just some arbitrary motion
 
         // TODO more performant way to do nested loop with mutability
-        let clone = self.instances.clone();
-        for instance in self.instances.iter_mut() {
+        let clone = self.atom_instances.clone();
+        for instance in self.atom_instances.iter_mut() {
             let mut total_force = Vector3::zero();
             let mass: f32 = 1.;
             for instance2 in &clone {
                 total_force += calc_lennard_jones_force(instance.position, instance2.position);
             }
-            instance.acceleration = total_force / mass;
+            // instance.acceleration = total_force / mass;
             instance.update_physics(time_delta);
         }
 
@@ -174,7 +174,7 @@ impl<'a> State<'a> {
     /// updates instance buffer to reflect instances
     fn on_instances_updated(&mut self) {
         let instance_data: Vec<InstanceRaw> = self
-            .instances
+            .atom_instances
             .iter()
             .map(Instance::to_raw)
             .collect::<Vec<_>>();
@@ -214,8 +214,8 @@ impl<'a> State<'a> {
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.draw_model_instanced(
-                &self.obj_model,
-                0..self.instances.len() as u32,
+                &self.atom_model,
+                0..self.atom_instances.len() as u32,
                 &self.camera.bind_group,
             );
         }
