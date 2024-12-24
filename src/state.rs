@@ -4,6 +4,7 @@ use crate::{
     camera::{Camera, CameraController, CameraUniform},
     instance::{Instance, InstanceRaw},
     model::{self, DrawModel, Vertex},
+    mol2_parser::{Atom, Mol2AssetLoader},
     resources, texture,
 };
 use cgmath::{prelude::*, Vector3};
@@ -52,15 +53,6 @@ impl<'a> State<'a> {
 
         let camera = create_camera_deps(&device, &config);
 
-        let instances = create_instances();
-        let instance_data: Vec<InstanceRaw> =
-            instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instance_data),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
         log::warn!("Load model");
 
         let obj_model =
@@ -85,6 +77,18 @@ impl<'a> State<'a> {
 
         let render_pipeline =
             create_render_pipeline(&device, render_pipeline_layout, shader, &config);
+
+        let asset_loader = Mol2AssetLoader {};
+        let mol = asset_loader.read("res/benzene.mol2").await.unwrap();
+        let instances = create_instances_for_atoms(mol.atoms);
+        // let instances = create_instances();
+        let instance_data: Vec<InstanceRaw> =
+            instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: bytemuck::cast_slice(&instance_data),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
 
         Self {
             surface,
@@ -160,8 +164,8 @@ impl<'a> State<'a> {
             for instance2 in &clone {
                 total_force += calc_lennard_jones_force(instance.position, instance2.position);
             }
-            instance.acceleration = total_force / mass;
-            instance.acceleration *= 100.; // make it quicker (too much time waiting otherwise)
+            // instance.acceleration = total_force / mass;
+            // instance.acceleration *= 100.; // make it quicker (too much time waiting otherwise)
             instance.update_physics(time_delta);
         }
 
@@ -414,7 +418,7 @@ fn create_camera_deps(device: &Device, config: &SurfaceConfiguration) -> CameraD
 }
 
 fn create_instances() -> Vec<Instance> {
-    const NUM_INSTANCES_PER_ROW: u32 = 40;
+    const NUM_INSTANCES_PER_ROW: u32 = 2;
     const SPACE_BETWEEN: f32 = 3.0;
 
     (0..NUM_INSTANCES_PER_ROW)
@@ -424,6 +428,7 @@ fn create_instances() -> Vec<Instance> {
                 let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
 
                 let position = cgmath::Vector3 { x, y: 0.0, z };
+                println!("added atom at: {:?}", position);
 
                 let rotation = if position.is_zero() {
                     cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
@@ -438,6 +443,33 @@ fn create_instances() -> Vec<Instance> {
                     acceleration: Vector3::zero(),
                 }
             })
+        })
+        .collect::<Vec<_>>()
+}
+
+fn create_instances_for_atoms(atoms: Vec<Atom>) -> Vec<Instance> {
+    atoms
+        .into_iter()
+        .map(|atom| {
+            let position = cgmath::Vector3 {
+                x: atom.x,
+                y: atom.y,
+                z: atom.z,
+            };
+            // println!("added atom at: {:?}", position);
+
+            let rotation = if position.is_zero() {
+                cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
+            } else {
+                cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+            };
+
+            Instance {
+                position,
+                rotation,
+                velocity: Vector3::zero(),
+                acceleration: Vector3::zero(),
+            }
         })
         .collect::<Vec<_>>()
 }

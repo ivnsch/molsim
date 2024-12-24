@@ -11,8 +11,10 @@ use winit::{
 use wasm_bindgen::prelude::*;
 
 mod camera;
+mod element;
 mod instance;
 mod model;
+mod mol2_parser;
 mod resources;
 mod state;
 mod texture;
