@@ -1,13 +1,13 @@
-use std::{iter, time::Duration};
-
 use crate::{
     camera::{Camera, CameraController, CameraUniform},
+    element::Element,
     instance::{Instance, InstanceEntity, InstanceRaw},
     model::{self, DrawModel, Vertex},
     mol2_parser::{Atom, Bond, Mol, Mol2AssetLoader},
     resources, texture,
 };
 use cgmath::{prelude::*, Quaternion, Vector3};
+use std::{collections::HashMap, iter, time::Duration};
 use wgpu::{
     util::DeviceExt, Adapter, BindGroup, BindGroupLayout, Buffer, Device, Queue,
     RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPipeline, ShaderModule,
@@ -25,6 +25,8 @@ pub struct State<'a> {
     pub camera: CameraDeps,
     pub depth_texture: texture::Texture,
     pub window: &'a Window,
+
+    pub mol: Mol,
     pub atom_instances: Instances,
     pub bond_instances: Instances,
 
@@ -79,8 +81,8 @@ impl<'a> State<'a> {
 
         let asset_loader = Mol2AssetLoader {};
         // let mol = asset_loader.read("res/basic.mol2", 1).await.unwrap();
-        // let mol = asset_loader.read("res/benzene.mol2", 1).await.unwrap();
-        let mol = asset_loader.read("res/117_ideal.mol2", 1).await.unwrap();
+        let mol = asset_loader.read("res/benzene.mol2", 1).await.unwrap();
+        // let mol = asset_loader.read("res/117_ideal.mol2", 1).await.unwrap();
 
         let atom_instances =
             create_atom_instances(&device, &texture_bind_group_layout, &queue, &mol).await;
@@ -94,6 +96,7 @@ impl<'a> State<'a> {
             config,
             size,
             render_pipeline,
+            mol,
             atom_instances,
             bond_instances,
             camera,
@@ -163,13 +166,22 @@ impl<'a> State<'a> {
                         atom1.mol_id != atom2.mol_id
                     }
                     // no force between bonds
+                    // TODO remove: we're iterating over atoms, no bonds here
+                    // TODO relatedly, weird design, maybe should not be enums
                     (InstanceEntity::Bond(_), _) => false,
                     (_, InstanceEntity::Bond(_)) => false,
                 };
                 if calculate_lennard_potential {
-                    total_force += calc_lennard_jones_force(instance.position, instance2.position);
+                    // total_force += calc_lennard_jones_force(instance.position, instance2.position);
                 }
             }
+
+            // bond forces
+            if let InstanceEntity::Atom(atom) = &instance.entity {
+                let bond_force = calc_bonds_force(atom, &self.mol);
+                total_force += bond_force;
+            }
+
             instance.acceleration = total_force / mass;
             instance.update_physics(time_delta);
         }
@@ -668,13 +680,22 @@ fn calc_lennard_jones_force(pos1: Vector3<f32>, pos2: Vector3<f32>) -> Vector3<f
     // let force_magnitude = -1. * calc_lennard_jones_potential_derivative(sigma, epsilon, distance);
     let force_magnitude = 1. * calc_lennard_jones_potential_derivative(sigma, epsilon, distance);
 
-    if force_magnitude.is_nan() || force_magnitude.is_infinite() {
+    force_magnitude_to_vector(force_magnitude, pos1, pos2)
+}
+
+/// force magnitude between 2 points
+fn force_magnitude_to_vector(
+    magnitude: f32,
+    pos1: Vector3<f32>,
+    pos2: Vector3<f32>,
+) -> Vector3<f32> {
+    if magnitude.is_nan() || magnitude.is_infinite() {
         return Vector3::zero();
     }
 
     let direction = (pos2 - pos1).normalize();
 
-    direction * force_magnitude
+    direction * magnitude
 }
 
 #[cfg(test)]
@@ -710,5 +731,91 @@ mod test {
                 distance, potential, force
             );
         }
+    }
+}
+
+// fn calc_bonds_force(atom: &Atom, mol: &Mol) -> f32 {
+//     let magnitude = calc_bonds_force_magnitude(atom, mol);
+//     force_magnitude_to_vector(magnitude, pos1, pos2)
+
+// }
+/// calculates total bond energy of an atom's bonded atoms
+fn calc_bonds_force(atom: &Atom, mol: &Mol) -> Vector3<f32> {
+    let mut atoms_by_id = HashMap::new();
+    for atom in &mol.atoms {
+        atoms_by_id.insert(atom.id, atom);
+    }
+
+    // get neighbors (and bond: TODO check whether actually needed)
+    let mut bonded_atoms = vec![];
+    for bond in &mol.bonds {
+        let bonded_atom = if bond.atom1 == atom.id {
+            Some(bond.atom2)
+        } else if bond.atom2 == atom.id {
+            Some(bond.atom1)
+        } else {
+            None
+        };
+
+        if let Some(bonded_atom) = bonded_atom {
+            // note that we assume the atom exists because this hashmap is derived from all the atoms in the molecule
+            // (TODO multiple molecules)
+            let atom = atoms_by_id[&bonded_atom].clone();
+            bonded_atoms.push(atom);
+        }
+    }
+
+    // TODO collapse this with previous loop
+    let mut sum = Vector3::zero();
+    for bonded_atom in bonded_atoms {
+        let magnitude = calc_bond_force_magnitude(atom, &bonded_atom);
+        let vector = force_magnitude_to_vector(magnitude, atom.pos(), bonded_atom.pos());
+        sum += vector
+    }
+
+    sum
+}
+
+fn calc_bond_force_magnitude(atom1: &Atom, atom2: &Atom) -> f32 {
+    let k = calc_bond_k(atom1, atom2);
+    let length = atom1.pos().distance(atom2.pos());
+    let length_0 = calc_bond_l0(atom1, atom2);
+
+    // derivative of bond energy, which is k * (length - length_0).powi(2)
+    // src (bond energy): https://youtu.be/Nd2SBfrsaw4?si=VkRbcnd1DaTaAVPK&t=107
+    -2. * k * (length - length_0)
+}
+
+// constant based on atoms involved
+// from https://ambermd.org/antechamber/gaff.html
+// table 2, column 4 or 8
+fn calc_bond_k(atom1: &Atom, atom2: &Atom) -> f32 {
+    match (&atom1.element, &atom2.element) {
+        (Element::H, Element::H) => 4.661,
+        (Element::H, Element::C) | (Element::C, Element::H) => 6.217,
+        (Element::H, Element::N) | (Element::N, Element::H) => 6.057,
+        (Element::C, Element::C) => 7.643,
+        (Element::C, Element::O) | (Element::O, Element::C) => 7.347,
+        (Element::C, Element::N) | (Element::N, Element::C) => 7.504,
+        (Element::C, Element::F) | (Element::F, Element::C) => 7.227,
+        // setting some fixed reasonable value for rest now. TODO complete
+        _ => 6.0,
+    }
+}
+
+// constant based on atoms involved
+// from https://ambermd.org/antechamber/gaff.html
+// table 2, column 3 or 7
+fn calc_bond_l0(atom1: &Atom, atom2: &Atom) -> f32 {
+    match (&atom1.element, &atom2.element) {
+        (Element::H, Element::H) => 0.738,
+        (Element::H, Element::C) | (Element::C, Element::H) => 1.090,
+        (Element::H, Element::N) | (Element::N, Element::H) => 1.010,
+        (Element::C, Element::C) => 1.526,
+        (Element::C, Element::O) | (Element::O, Element::C) => 1.440,
+        (Element::C, Element::N) | (Element::N, Element::C) => 1.470,
+        (Element::C, Element::F) | (Element::F, Element::C) => 1.370,
+        // setting some fixed reasonable value for rest now. TODO complete
+        _ => 1.5,
     }
 }

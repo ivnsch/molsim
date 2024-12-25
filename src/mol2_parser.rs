@@ -193,7 +193,7 @@ pub struct Mol {
 #[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct Atom {
-    pub id: i32,
+    pub id: usize,
     pub name: String,
     pub x: f32,
     pub y: f32,
