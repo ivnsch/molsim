@@ -156,14 +156,15 @@ impl<'a> State<'a> {
         // just some arbitrary motion
 
         // TODO more performant way to do nested loop with mutability
-        let clone = self.atom_instances.instances.clone();
+        let clones = self.atom_instances.instances.clone();
         for instance in self.atom_instances.instances.iter_mut() {
             let mut total_force = Vector3::zero();
             let mass: f32 = 1.;
-            for instance2 in &clone {
-                let calculate_lennard_potential = match (&instance.entity, &instance2.entity) {
-                    (InstanceEntity::Atom(atom1), InstanceEntity::Atom(atom2)) => {
-                        atom1.mol_id != atom2.mol_id
+            for instance2_cloned in &clones {
+                let calculate_lennard_potential = match (&instance.entity, &instance2_cloned.entity)
+                {
+                    (InstanceEntity::Atom(atom1), InstanceEntity::Atom(atom2_cloned)) => {
+                        atom1.mol_id != atom2_cloned.mol_id
                     }
                     // no force between bonds
                     // TODO remove: we're iterating over atoms, no bonds here
@@ -172,7 +173,8 @@ impl<'a> State<'a> {
                     (_, InstanceEntity::Bond(_)) => false,
                 };
                 if calculate_lennard_potential {
-                    // total_force += calc_lennard_jones_force(instance.position, instance2.position);
+                    total_force +=
+                        calc_lennard_jones_force(instance.position, instance2_cloned.position);
                 }
             }
 
