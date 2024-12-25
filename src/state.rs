@@ -854,12 +854,18 @@ fn calc_bonds_force(atom: &Atom, mol: &Mol) -> Vector3<f32> {
     // TODO collapse this with previous loop
     let mut sum = Vector3::zero();
     for bonded_atom in bonded_atoms {
-        let magnitude = calc_bond_force_magnitude(atom, &bonded_atom);
-        let vector = force_magnitude_to_vector(magnitude, atom.pos(), bonded_atom.pos());
-        sum += vector
+        let force = calc_bond_force(atom, bonded_atom);
+        sum += force
     }
 
     sum
+}
+
+fn calc_bond_force(atom: &Atom, atom2: &Atom) -> Vector3<f32> {
+    let magnitude = calc_bond_force_magnitude(atom, atom2);
+    let vector = force_magnitude_to_vector(magnitude, atom.pos(), atom2.pos());
+
+    vector
 }
 
 fn calc_bond_force_magnitude(atom1: &Atom, atom2: &Atom) -> f32 {
