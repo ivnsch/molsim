@@ -7,7 +7,7 @@ use crate::{
     mol2_parser::{Atom, Bond, Mol, Mol2AssetLoader},
     resources, texture,
 };
-use cgmath::{prelude::*, Vector3};
+use cgmath::{prelude::*, Quaternion, Vector3};
 use wgpu::{
     util::DeviceExt, Adapter, BindGroup, BindGroupLayout, Buffer, Device, Queue,
     RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPipeline, ShaderModule,
@@ -78,7 +78,9 @@ impl<'a> State<'a> {
             create_render_pipeline(&device, render_pipeline_layout, shader, &config);
 
         let asset_loader = Mol2AssetLoader {};
-        let mol = asset_loader.read("res/basic.mol2", 1).await.unwrap();
+        // let mol = asset_loader.read("res/basic.mol2", 1).await.unwrap();
+        // let mol = asset_loader.read("res/benzene.mol2", 1).await.unwrap();
+        let mol = asset_loader.read("res/117_ideal.mol2", 1).await.unwrap();
 
         let atom_instances =
             create_atom_instances(&device, &texture_bind_group_layout, &queue, &mol).await;
@@ -509,31 +511,45 @@ fn generate_instances_bonds(mol: &Mol) -> Vec<Instance> {
         .iter()
         .map(|bond| {
             // TODO make sure this doesn't crash (e.g. corrupted file)
-            let atom1 = &atoms[bond.atom1];
-            // for now just render it at atom's pos
-            let position = cgmath::Vector3 {
-                x: atom1.x,
-                y: atom1.y,
-                z: atom1.z,
-            };
-            // println!("added atom at: {:?}", position);
+            let atom1 = &atoms[bond.atom1 - 1].pos();
+            let atom2 = &atoms[bond.atom2 - 1].pos();
 
-            let rotation = if position.is_zero() {
-                cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
-            } else {
-                cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-            };
+            let position: Vector3<f32> = (atom1 + atom2) / 2.;
+
+            let rotation = calc_bond_rotation(*atom1, *atom2);
+
+            // scale cylinder mesh to distance
+            // 2. is the height of the cylinder mesh
+            let scale_y = atom1.distance(*atom2) / 2.;
 
             Instance {
                 position,
                 rotation,
                 velocity: Vector3::zero(),
                 acceleration: Vector3::zero(),
-                scale: 0.3,
+                scale: Vector3::new(0.1, scale_y, 0.1),
                 entity: InstanceEntity::Bond(bond.clone()),
             }
         })
         .collect::<Vec<_>>()
+}
+
+fn calc_bond_rotation(point1: Vector3<f32>, point2: Vector3<f32>) -> Quaternion<f32> {
+    let dir = (point2 - point1).normalize();
+    let bond_up = Vector3::new(0., 1., 0.);
+    if dir == bond_up {
+        return Quaternion::from_angle_y(cgmath::Rad(0.0));
+    } else if dir == -bond_up {
+        return Quaternion::from_axis_angle(
+            Vector3::new(1.0, 0.0, 0.0),
+            cgmath::Rad(std::f32::consts::PI),
+        );
+    }
+
+    let cross = dir.cross(bond_up).normalize();
+    let dot = dir.dot(bond_up).acos();
+
+    cgmath::Quaternion::from_axis_angle(cross, cgmath::Rad(-dot))
 }
 
 fn generate_instances_atoms(atoms: &[Atom]) -> Vec<Instance> {
@@ -558,7 +574,7 @@ fn generate_instances_atoms(atoms: &[Atom]) -> Vec<Instance> {
                 rotation,
                 velocity: Vector3::zero(),
                 acceleration: Vector3::zero(),
-                scale: 0.3,
+                scale: Vector3::new(0.3, 0.3, 0.3),
                 entity: InstanceEntity::Atom(atom.clone()),
             }
         })

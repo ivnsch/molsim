@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
+use cgmath::Vector3;
 
 use crate::element::Element;
 
@@ -202,6 +203,12 @@ pub struct Atom {
     pub mol_name: String,
     pub element: Element,
     pub mol_id: u32,
+}
+
+impl Atom {
+    pub fn pos(&self) -> Vector3<f32> {
+        return Vector3::new(self.x, self.y, self.z);
+    }
 }
 
 // impl Mol2Atom {
