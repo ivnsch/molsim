@@ -708,11 +708,15 @@ fn force_magnitude_to_vector(
 
 #[cfg(test)]
 mod test {
-    use cgmath::{MetricSpace, Vector3};
+    use cgmath::{MetricSpace, Vector3, Zero};
 
-    use crate::state::calc_lennard_jones_potential;
+    use crate::{
+        element::Element,
+        mol2_parser::Atom,
+        state::{calc_bond_force, calc_lennard_jones_potential},
+    };
 
-    use super::calc_lennard_jones_force;
+    use super::{calc_bond_force_magnitude, calc_lennard_jones_force};
 
     // to get an idea of magnitudes
     #[test]
@@ -740,13 +744,87 @@ mod test {
             );
         }
     }
+
+    #[test]
+    fn test_bond_force_0() {
+        // this x is the standard distance between 2 C atoms, the other atom is at position 0,
+        // so distance between these atoms is the standard distance
+        let atom1 = create_carbon_atom_with_x(1.526);
+        let atom2 = create_carbon_atom_with_x(0.);
+
+        let bond_length = atom1.pos().distance(atom2.pos());
+        // sanity check to confirm expected distance
+        assert_eq!(1.526, bond_length);
+
+        // since our bond length is the standard one, it doesn't have to adjust
+        // so we expect no force
+        let magnitude = calc_bond_force_magnitude(&atom1, &atom2);
+        assert_eq!(0., magnitude);
+        let force = calc_bond_force(&atom1, &atom2);
+        assert_eq!(Vector3::zero(), force);
+    }
+
+    #[test]
+    fn test_bond_force_positive() {
+        // these 2 atoms are at a distance slightly shorter than standard distance between 2 C atoms
+        let atom1 = create_carbon_atom_with_x(-0.5);
+        let atom2 = create_carbon_atom_with_x(1.);
+
+        let bond_length = atom1.pos().distance(atom2.pos());
+        assert_eq!(1.5, bond_length);
+
+        // since the distance is shorter, we expect an expanding force (positive) to match standard distance
+        let magnitude = calc_bond_force_magnitude(&atom1, &atom2);
+        assert!(magnitude > 0.);
+
+        assert_eq!(0.39743635, magnitude);
+
+        let force = calc_bond_force(&atom1, &atom2);
+        // the distance is only on x, so we expect the force to be only there too
+        assert_eq!(0.39743635, force.x);
+        assert_eq!(0., force.y);
+        assert_eq!(0., force.z);
+    }
+
+    #[test]
+    fn test_bond_force_negative() {
+        // these 2 atoms are at a distance slightly larger than standard distance between 2 C atoms
+        let atom1 = create_carbon_atom_with_x(-0.6);
+        let atom2 = create_carbon_atom_with_x(1.);
+
+        let bond_length = atom1.pos().distance(atom2.pos());
+        assert_eq!(1.6, bond_length);
+
+        // since the distance is larger, we expect a contracting force (negative) to match standard distance
+        let magnitude = calc_bond_force_magnitude(&atom1, &atom2);
+        assert!(magnitude < 0.);
+
+        assert_eq!(-1.1311641, magnitude);
+
+        let force = calc_bond_force(&atom1, &atom2);
+        // the distance is only on x, so we expect the force to be only there too
+        assert_eq!(-1.1311641, force.x);
+        assert_eq!(0., force.y);
+        assert_eq!(0., force.z);
+    }
+
+    /// create a cabon atom with some defaults and a specific x
+    fn create_carbon_atom_with_x(x: f32) -> Atom {
+        Atom {
+            id: 1,
+            name: "".to_string(),
+            x,
+            y: 0.,
+            z: 0.,
+            type_: "".to_string(),
+            bond_count: 0,
+            mol_name: "".to_string(),
+            element: Element::C,
+            mol_id: 0,
+        }
+    }
 }
 
-// fn calc_bonds_force(atom: &Atom, mol: &Mol) -> f32 {
-//     let magnitude = calc_bonds_force_magnitude(atom, mol);
-//     force_magnitude_to_vector(magnitude, pos1, pos2)
-
-// }
 /// calculates total bond energy of an atom's bonded atoms
 fn calc_bonds_force(atom: &Atom, mol: &Mol) -> Vector3<f32> {
     let mut atoms_by_id = HashMap::new();
