@@ -846,7 +846,7 @@ fn calc_bonds_force(atom: &Atom, mol: &Mol) -> Vector3<f32> {
         if let Some(bonded_atom) = bonded_atom {
             // note that we assume the atom exists because this hashmap is derived from all the atoms in the molecule
             // (TODO multiple molecules)
-            let atom = atoms_by_id[&bonded_atom].clone();
+            let atom = atoms_by_id[&bonded_atom];
             bonded_atoms.push(atom);
         }
     }
