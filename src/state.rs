@@ -208,6 +208,7 @@ impl<'a> State<'a> {
                 });
         self.atom_instances.buffer = bonds_instance_buffer;
 
+        self.update_instances_bonds();
         let bonds_instance_raw: Vec<InstanceRaw> = self
             .bond_instances
             .instances
@@ -222,6 +223,11 @@ impl<'a> State<'a> {
                     usage: wgpu::BufferUsages::VERTEX,
                 });
         self.bond_instances.buffer = bonds_instance_buffer;
+    }
+
+    fn update_instances_bonds(&mut self) {
+        let new_instances = generate_instances_bonds(&self.mol, &self.atom_instances.instances);
+        self.bond_instances.instances = new_instances;
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
