@@ -86,8 +86,14 @@ impl<'a> State<'a> {
 
         let atom_instances =
             create_atom_instances(&device, &texture_bind_group_layout, &queue, &mol).await;
-        let bond_instances =
-            create_bond_instances(&device, &texture_bind_group_layout, &queue, &mol).await;
+        let bond_instances = create_bond_instances(
+            &device,
+            &texture_bind_group_layout,
+            &queue,
+            &mol,
+            &atom_instances.instances,
+        )
+        .await;
 
         Self {
             surface,
@@ -488,8 +494,9 @@ async fn create_bond_instances(
     texture_bind_group_layout: &BindGroupLayout,
     queue: &Queue,
     mol: &Mol,
+    atom_instances: &[Instance],
 ) -> Instances {
-    let instances = generate_instances_bonds(mol);
+    let instances = generate_instances_bonds(mol, atom_instances);
     create_instances_data(
         &device,
         &texture_bind_group_layout,
@@ -524,15 +531,14 @@ async fn create_instances_data(
     }
 }
 
-fn generate_instances_bonds(mol: &Mol) -> Vec<Instance> {
-    let atoms = &mol.atoms;
-
+fn generate_instances_bonds(mol: &Mol, atoms: &[Instance]) -> Vec<Instance> {
+    // let atoms = &mol.atoms;
     mol.bonds
         .iter()
         .map(|bond| {
             // TODO make sure this doesn't crash (e.g. corrupted file)
-            let atom1 = &atoms[bond.atom1 - 1].pos();
-            let atom2 = &atoms[bond.atom2 - 1].pos();
+            let atom1 = &atoms[bond.atom1 - 1].position;
+            let atom2 = &atoms[bond.atom2 - 1].position;
 
             let position: Vector3<f32> = (atom1 + atom2) / 2.;
 
