@@ -931,7 +931,7 @@ fn calc_bond_force_magnitude(atom1: &AtomEntity, atom2: &AtomEntity) -> f32 {
 
     // derivative of bond energy, which is k * (length - length_0).powi(2)
     // src (bond energy): https://youtu.be/Nd2SBfrsaw4?si=VkRbcnd1DaTaAVPK&t=107
-    -2. * k * (length - length_0)
+    2. * k * (length - length_0)
 }
 
 // constant based on atoms involved
