@@ -31,6 +31,9 @@ pub struct State<'a> {
     pub bonds: BondEntities,
 
     last_time: Option<Duration>, // used to calc time difference and apply physics
+
+    // quick access
+    atoms_by_id: HashMap<usize, AtomEntity>,
 }
 
 pub struct AtomEntities {
@@ -87,8 +90,8 @@ impl<'a> State<'a> {
 
         let asset_loader = Mol2AssetLoader {};
         // let mol = asset_loader.read("res/basic.mol2", 1).await.unwrap();
-        let mol = asset_loader.read("res/benzene.mol2", 1).await.unwrap();
-        // let mol = asset_loader.read("res/117_ideal.mol2", 1).await.unwrap();
+        // let mol = asset_loader.read("res/benzene.mol2", 1).await.unwrap();
+        let mol = asset_loader.read("res/117_ideal.mol2", 1).await.unwrap();
 
         let atom_instances =
             create_atom_instances(&device, &texture_bind_group_layout, &queue, &mol).await;
@@ -100,6 +103,11 @@ impl<'a> State<'a> {
             &atom_instances.entities,
         )
         .await;
+
+        let mut atoms_by_id = HashMap::new();
+        for atom in &atom_instances.entities {
+            atoms_by_id.insert(atom.model.id, atom.clone());
+        }
 
         Self {
             surface,
@@ -115,6 +123,7 @@ impl<'a> State<'a> {
             depth_texture,
             window,
             last_time: None,
+            atoms_by_id,
         }
     }
 
@@ -182,7 +191,7 @@ impl<'a> State<'a> {
                 }
             }
 
-            let bond_force = calc_bonds_force(atom, &self.mol, &atom_clones);
+            let bond_force = calc_bonds_force(atom, &self.mol, &self.atoms_by_id);
             total_force += bond_force;
 
             atom.instance.acceleration = total_force / mass;
@@ -880,12 +889,11 @@ mod test {
 }
 
 /// calculates total bond energy of an atom's bonded atoms
-fn calc_bonds_force(atom: &AtomEntity, mol: &Mol, all_atoms: &[AtomEntity]) -> Vector3<f32> {
-    let mut atoms_by_id = HashMap::new();
-    for atom in all_atoms {
-        atoms_by_id.insert(atom.model.id, atom);
-    }
-
+fn calc_bonds_force(
+    atom: &AtomEntity,
+    mol: &Mol,
+    atoms_by_id: &HashMap<usize, AtomEntity>,
+) -> Vector3<f32> {
     // get neighbors (and bond: TODO check whether actually needed)
     let mut bonded_atoms = vec![];
     for bond in &mol.bonds {
@@ -900,7 +908,7 @@ fn calc_bonds_force(atom: &AtomEntity, mol: &Mol, all_atoms: &[AtomEntity]) -> V
         if let Some(bonded_atom) = bonded_atom {
             // note that we assume the atom exists because this hashmap is derived from all the atoms in the molecule
             // (TODO multiple molecules)
-            let atom = atoms_by_id[&bonded_atom];
+            let atom = &atoms_by_id[&bonded_atom];
             bonded_atoms.push(atom);
         }
     }
@@ -908,7 +916,7 @@ fn calc_bonds_force(atom: &AtomEntity, mol: &Mol, all_atoms: &[AtomEntity]) -> V
     // TODO collapse this with previous loop
     let mut sum = Vector3::zero();
     for bonded_atom in bonded_atoms {
-        let force = calc_bond_force(atom, bonded_atom);
+        let force = calc_bond_force(atom, &bonded_atom);
         sum += force
     }
 
@@ -926,7 +934,6 @@ fn calc_bond_force(atom: &AtomEntity, atom2: &AtomEntity) -> Vector3<f32> {
 fn calc_bond_force_magnitude(atom1: &AtomEntity, atom2: &AtomEntity) -> f32 {
     let k = calc_bond_k(&atom1.model, &atom2.model);
     let length = atom1.instance.position.distance(atom2.instance.position);
-    println!("length: {:?}", length);
     let length_0 = calc_bond_l0(&atom1.model, &atom2.model);
 
     // derivative of bond energy, which is k * (length - length_0).powi(2)
