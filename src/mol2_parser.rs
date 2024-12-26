@@ -205,18 +205,6 @@ pub struct Atom {
     pub mol_id: u32,
 }
 
-impl Atom {
-    pub fn pos(&self) -> Vector3<f32> {
-        return Vector3::new(self.x, self.y, self.z);
-    }
-}
-
-// impl Mol2Atom {
-//     pub fn loc_vec3(&self) -> Vec3 {
-//         Vec3::new(self.x, self.y, self.z)
-//     }
-// }
-
 #[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct Bond {

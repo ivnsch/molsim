@@ -3,21 +3,24 @@ use std::time::Duration;
 use crate::mol2_parser::{Atom, Bond};
 
 #[derive(Debug, Clone)]
-pub enum InstanceEntity {
-    Atom(Atom),
-    #[allow(unused)]
-    Bond(Bond),
-}
-
-#[derive(Debug, Clone)]
 pub struct Instance {
     pub position: cgmath::Vector3<f32>,
     pub scale: cgmath::Vector3<f32>,
     pub velocity: cgmath::Vector3<f32>,
     pub acceleration: cgmath::Vector3<f32>,
     pub rotation: cgmath::Quaternion<f32>,
+}
 
-    pub entity: InstanceEntity,
+#[derive(Debug, Clone)]
+pub struct AtomEntity {
+    pub instance: Instance,
+    pub model: Atom,
+}
+
+#[derive(Debug, Clone)]
+pub struct BondEntity {
+    pub instance: Instance,
+    pub model: Bond,
 }
 
 impl Instance {

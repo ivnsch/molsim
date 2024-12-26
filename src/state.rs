@@ -1,9 +1,9 @@
 use crate::{
     camera::{Camera, CameraController, CameraUniform},
     element::Element,
-    instance::{Instance, InstanceEntity, InstanceRaw},
+    instance::{AtomEntity, BondEntity, Instance, InstanceRaw},
     model::{self, DrawModel, Vertex},
-    mol2_parser::{Atom, Bond, Mol, Mol2AssetLoader},
+    mol2_parser::{Atom, Mol, Mol2AssetLoader},
     resources, texture,
 };
 use cgmath::{prelude::*, Quaternion, Vector3};
@@ -27,15 +27,21 @@ pub struct State<'a> {
     pub window: &'a Window,
 
     pub mol: Mol,
-    pub atom_instances: Instances,
-    pub bond_instances: Instances,
+    pub atoms: AtomEntities,
+    pub bonds: BondEntities,
 
     last_time: Option<Duration>, // used to calc time difference and apply physics
 }
 
-pub struct Instances {
+pub struct AtomEntities {
     model: model::Model,
-    instances: Vec<Instance>,
+    entities: Vec<AtomEntity>,
+    buffer: wgpu::Buffer,
+}
+
+pub struct BondEntities {
+    model: model::Model,
+    entities: Vec<BondEntity>,
     buffer: wgpu::Buffer,
 }
 
@@ -91,7 +97,7 @@ impl<'a> State<'a> {
             &texture_bind_group_layout,
             &queue,
             &mol,
-            &atom_instances.instances,
+            &atom_instances.entities,
         )
         .await;
 
@@ -103,8 +109,8 @@ impl<'a> State<'a> {
             size,
             render_pipeline,
             mol,
-            atom_instances,
-            bond_instances,
+            atoms: atom_instances,
+            bonds: bond_instances,
             camera,
             depth_texture,
             window,
@@ -162,36 +168,26 @@ impl<'a> State<'a> {
         // just some arbitrary motion
 
         // TODO more performant way to do nested loop with mutability
-        let clones = self.atom_instances.instances.clone();
-        for instance in self.atom_instances.instances.iter_mut() {
+        let atom_clones = self.atoms.entities.clone();
+        for atom in self.atoms.entities.iter_mut() {
             let mut total_force = Vector3::zero();
             let mass: f32 = 1.;
-            for instance2_cloned in &clones {
-                let calculate_lennard_potential = match (&instance.entity, &instance2_cloned.entity)
-                {
-                    (InstanceEntity::Atom(atom1), InstanceEntity::Atom(atom2_cloned)) => {
-                        atom1.mol_id != atom2_cloned.mol_id
-                    }
-                    // no force between bonds
-                    // TODO remove: we're iterating over atoms, no bonds here
-                    // TODO relatedly, weird design, maybe should not be enums
-                    (InstanceEntity::Bond(_), _) => false,
-                    (_, InstanceEntity::Bond(_)) => false,
-                };
-                if calculate_lennard_potential {
-                    total_force +=
-                        calc_lennard_jones_force(instance.position, instance2_cloned.position);
+            for atom2_cloned in &atom_clones {
+                // for now calculate lennard jones only if atoms in different molecules
+                if atom.model.mol_id != atom2_cloned.model.mol_id {
+                    total_force += calc_lennard_jones_force(
+                        atom.instance.position,
+                        atom2_cloned.instance.position,
+                    );
                 }
             }
 
-            // bond forces
-            if let InstanceEntity::Atom(atom) = &instance.entity {
-                let bond_force = calc_bonds_force(atom, &self.mol);
-                total_force += bond_force;
-            }
+            let bond_force = calc_bonds_force(atom, &self.mol, &atom_clones);
+            total_force += bond_force;
 
-            instance.acceleration = total_force / mass;
-            instance.update_physics(time_delta);
+            atom.instance.acceleration = total_force / mass;
+            atom.instance.acceleration /= 100.;
+            atom.instance.update_physics(time_delta);
         }
 
         self.on_instances_updated();
@@ -200,10 +196,10 @@ impl<'a> State<'a> {
     /// updates instance buffer to reflect instances
     fn on_instances_updated(&mut self) {
         let atoms_instance_raw: Vec<InstanceRaw> = self
-            .atom_instances
-            .instances
+            .atoms
+            .entities
             .iter()
-            .map(Instance::to_raw)
+            .map(|e| Instance::to_raw(&e.instance))
             .collect::<Vec<_>>();
         let bonds_instance_buffer =
             self.device
@@ -212,14 +208,14 @@ impl<'a> State<'a> {
                     contents: bytemuck::cast_slice(&atoms_instance_raw),
                     usage: wgpu::BufferUsages::VERTEX,
                 });
-        self.atom_instances.buffer = bonds_instance_buffer;
+        self.atoms.buffer = bonds_instance_buffer;
 
         self.update_instances_bonds();
         let bonds_instance_raw: Vec<InstanceRaw> = self
-            .bond_instances
-            .instances
+            .bonds
+            .entities
             .iter()
-            .map(Instance::to_raw)
+            .map(|e| Instance::to_raw(&e.instance))
             .collect::<Vec<_>>();
         let bonds_instance_buffer =
             self.device
@@ -228,12 +224,12 @@ impl<'a> State<'a> {
                     contents: bytemuck::cast_slice(&bonds_instance_raw),
                     usage: wgpu::BufferUsages::VERTEX,
                 });
-        self.bond_instances.buffer = bonds_instance_buffer;
+        self.bonds.buffer = bonds_instance_buffer;
     }
 
     fn update_instances_bonds(&mut self) {
-        let new_instances = generate_instances_bonds(&self.mol, &self.atom_instances.instances);
-        self.bond_instances.instances = new_instances;
+        let new_instances = generate_instances_bonds(&self.mol, &self.atoms.entities);
+        self.bonds.entities = new_instances;
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -259,19 +255,19 @@ impl<'a> State<'a> {
                 timestamp_writes: None,
             });
 
-            render_pass.set_vertex_buffer(1, self.atom_instances.buffer.slice(..));
+            render_pass.set_vertex_buffer(1, self.atoms.buffer.slice(..));
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.draw_model_instanced(
-                &self.atom_instances.model,
-                0..self.atom_instances.instances.len() as u32,
+                &self.atoms.model,
+                0..self.atoms.entities.len() as u32,
                 &self.camera.bind_group,
             );
 
-            render_pass.set_vertex_buffer(1, self.bond_instances.buffer.slice(..));
+            render_pass.set_vertex_buffer(1, self.bonds.buffer.slice(..));
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.draw_model_instanced(
-                &self.bond_instances.model,
-                0..self.bond_instances.instances.len() as u32,
+                &self.bonds.model,
+                0..self.bonds.entities.len() as u32,
                 &self.camera.bind_group,
             );
         }
@@ -477,9 +473,9 @@ async fn create_atom_instances(
     texture_bind_group_layout: &BindGroupLayout,
     queue: &Queue,
     mol: &Mol,
-) -> Instances {
+) -> AtomEntities {
     let instances = generate_instances_atoms(&mol.atoms);
-    create_instances_data(
+    create_atoms_instances_data(
         &device,
         &texture_bind_group_layout,
         &queue,
@@ -494,10 +490,10 @@ async fn create_bond_instances(
     texture_bind_group_layout: &BindGroupLayout,
     queue: &Queue,
     mol: &Mol,
-    atom_instances: &[Instance],
-) -> Instances {
-    let instances = generate_instances_bonds(mol, atom_instances);
-    create_instances_data(
+    instances: &[AtomEntity],
+) -> BondEntities {
+    let instances = generate_instances_bonds(mol, instances);
+    create_bonds_instances_data(
         &device,
         &texture_bind_group_layout,
         &queue,
@@ -507,38 +503,66 @@ async fn create_bond_instances(
     .await
 }
 
-async fn create_instances_data(
+async fn create_atoms_instances_data(
     device: &Device,
     texture_bind_group_layout: &BindGroupLayout,
     queue: &Queue,
     model_file: &str,
-    instances: Vec<Instance>,
-) -> Instances {
+    instances: Vec<AtomEntity>,
+) -> AtomEntities {
     let model = resources::load_model(model_file, device, queue, texture_bind_group_layout)
         .await
         .unwrap();
-    let instance_raw: Vec<InstanceRaw> = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-    let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Instance Buffer"),
-        contents: bytemuck::cast_slice(&instance_raw),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let instances_raw: Vec<InstanceRaw> = instances
+        .iter()
+        .map(|i| Instance::to_raw(&i.instance))
+        .collect::<Vec<_>>();
+    let instance_buffer = create_instance_buffer(device, &instances_raw);
 
-    Instances {
+    AtomEntities {
         model,
-        instances,
+        entities: instances,
+        buffer: instance_buffer,
+    }
+}
+async fn create_bonds_instances_data(
+    device: &Device,
+    texture_bind_group_layout: &BindGroupLayout,
+    queue: &Queue,
+    model_file: &str,
+    instances: Vec<BondEntity>,
+) -> BondEntities {
+    let model = resources::load_model(model_file, device, queue, texture_bind_group_layout)
+        .await
+        .unwrap();
+    let instances_raw: Vec<InstanceRaw> = instances
+        .iter()
+        .map(|i| Instance::to_raw(&i.instance))
+        .collect::<Vec<_>>();
+    let instance_buffer = create_instance_buffer(device, &instances_raw);
+    BondEntities {
+        model,
+        entities: instances,
         buffer: instance_buffer,
     }
 }
 
-fn generate_instances_bonds(mol: &Mol, atoms: &[Instance]) -> Vec<Instance> {
+fn create_instance_buffer(device: &Device, instances_raw: &[InstanceRaw]) -> wgpu::Buffer {
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Instance Buffer"),
+        contents: bytemuck::cast_slice(instances_raw),
+        usage: wgpu::BufferUsages::VERTEX,
+    })
+}
+
+fn generate_instances_bonds(mol: &Mol, atoms: &[AtomEntity]) -> Vec<BondEntity> {
     // let atoms = &mol.atoms;
     mol.bonds
         .iter()
         .map(|bond| {
             // TODO make sure this doesn't crash (e.g. corrupted file)
-            let atom1 = &atoms[bond.atom1 - 1].position;
-            let atom2 = &atoms[bond.atom2 - 1].position;
+            let atom1 = &atoms[bond.atom1 - 1].instance.position;
+            let atom2 = &atoms[bond.atom2 - 1].instance.position;
 
             let position: Vector3<f32> = (atom1 + atom2) / 2.;
 
@@ -548,13 +572,17 @@ fn generate_instances_bonds(mol: &Mol, atoms: &[Instance]) -> Vec<Instance> {
             // 2. is the height of the cylinder mesh
             let scale_y = atom1.distance(*atom2) / 2.;
 
-            Instance {
+            let instance = Instance {
                 position,
                 rotation,
                 velocity: Vector3::zero(),
                 acceleration: Vector3::zero(),
                 scale: Vector3::new(0.1, scale_y, 0.1),
-                entity: InstanceEntity::Bond(bond.clone()),
+            };
+
+            BondEntity {
+                instance,
+                model: bond.clone(),
             }
         })
         .collect::<Vec<_>>()
@@ -578,7 +606,7 @@ fn calc_bond_rotation(point1: Vector3<f32>, point2: Vector3<f32>) -> Quaternion<
     cgmath::Quaternion::from_axis_angle(cross, cgmath::Rad(-dot))
 }
 
-fn generate_instances_atoms(atoms: &[Atom]) -> Vec<Instance> {
+fn generate_instances_atoms(atoms: &[Atom]) -> Vec<AtomEntity> {
     atoms
         .into_iter()
         .map(|atom| {
@@ -595,13 +623,17 @@ fn generate_instances_atoms(atoms: &[Atom]) -> Vec<Instance> {
                 cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
             };
 
-            Instance {
+            let instance = Instance {
                 position,
                 rotation,
                 velocity: Vector3::zero(),
                 acceleration: Vector3::zero(),
                 scale: Vector3::new(0.3, 0.3, 0.3),
-                entity: InstanceEntity::Atom(atom.clone()),
+            };
+
+            AtomEntity {
+                instance,
+                model: atom.clone(),
             }
         })
         .collect::<Vec<_>>()
@@ -714,10 +746,11 @@ fn force_magnitude_to_vector(
 
 #[cfg(test)]
 mod test {
-    use cgmath::{MetricSpace, Vector3, Zero};
+    use cgmath::{MetricSpace, Rotation3, Vector3, Zero};
 
     use crate::{
         element::Element,
+        instance::{AtomEntity, Instance},
         mol2_parser::Atom,
         state::{calc_bond_force, calc_lennard_jones_potential},
     };
@@ -758,8 +791,7 @@ mod test {
         let atom1 = create_carbon_atom_with_x(1.526);
         let atom2 = create_carbon_atom_with_x(0.);
 
-        let bond_length = atom1.pos().distance(atom2.pos());
-        // sanity check to confirm expected distance
+        let bond_length = atom1.instance.position.distance(atom2.instance.position); // sanity check to confirm expected distance
         assert_eq!(1.526, bond_length);
 
         // since our bond length is the standard one, it doesn't have to adjust
@@ -776,7 +808,7 @@ mod test {
         let atom1 = create_carbon_atom_with_x(-0.5);
         let atom2 = create_carbon_atom_with_x(1.);
 
-        let bond_length = atom1.pos().distance(atom2.pos());
+        let bond_length = atom1.instance.position.distance(atom2.instance.position);
         assert_eq!(1.5, bond_length);
 
         // since the distance is shorter, we expect an expanding force (positive) to match standard distance
@@ -798,7 +830,7 @@ mod test {
         let atom1 = create_carbon_atom_with_x(-0.6);
         let atom2 = create_carbon_atom_with_x(1.);
 
-        let bond_length = atom1.pos().distance(atom2.pos());
+        let bond_length = atom1.instance.position.distance(atom2.instance.position);
         assert_eq!(1.6, bond_length);
 
         // since the distance is larger, we expect a contracting force (negative) to match standard distance
@@ -815,35 +847,51 @@ mod test {
     }
 
     /// create a cabon atom with some defaults and a specific x
-    fn create_carbon_atom_with_x(x: f32) -> Atom {
-        Atom {
-            id: 1,
-            name: "".to_string(),
-            x,
-            y: 0.,
-            z: 0.,
-            type_: "".to_string(),
-            bond_count: 0,
-            mol_name: "".to_string(),
-            element: Element::C,
-            mol_id: 0,
+    fn create_carbon_atom_with_x(x: f32) -> AtomEntity {
+        AtomEntity {
+            model: Atom {
+                id: 1,
+                name: "".to_string(),
+                x,
+                y: 0.,
+                z: 0.,
+                type_: "".to_string(),
+                bond_count: 0,
+                mol_name: "".to_string(),
+                element: Element::C,
+                mol_id: 0,
+            },
+            instance: Instance {
+                position: Vector3 { x: x, y: 0., z: 0. },
+                scale: Vector3 {
+                    x: 1.,
+                    y: 1.,
+                    z: 1.,
+                },
+                velocity: Vector3::zero(),
+                acceleration: Vector3::zero(),
+                rotation: cgmath::Quaternion::from_axis_angle(
+                    cgmath::Vector3::unit_z(),
+                    cgmath::Deg(0.0),
+                ),
+            },
         }
     }
 }
 
 /// calculates total bond energy of an atom's bonded atoms
-fn calc_bonds_force(atom: &Atom, mol: &Mol) -> Vector3<f32> {
+fn calc_bonds_force(atom: &AtomEntity, mol: &Mol, all_atoms: &[AtomEntity]) -> Vector3<f32> {
     let mut atoms_by_id = HashMap::new();
-    for atom in &mol.atoms {
-        atoms_by_id.insert(atom.id, atom);
+    for atom in all_atoms {
+        atoms_by_id.insert(atom.model.id, atom);
     }
 
     // get neighbors (and bond: TODO check whether actually needed)
     let mut bonded_atoms = vec![];
     for bond in &mol.bonds {
-        let bonded_atom = if bond.atom1 == atom.id {
+        let bonded_atom = if bond.atom1 == atom.model.id {
             Some(bond.atom2)
-        } else if bond.atom2 == atom.id {
+        } else if bond.atom2 == atom.model.id {
             Some(bond.atom1)
         } else {
             None
@@ -867,17 +915,19 @@ fn calc_bonds_force(atom: &Atom, mol: &Mol) -> Vector3<f32> {
     sum
 }
 
-fn calc_bond_force(atom: &Atom, atom2: &Atom) -> Vector3<f32> {
+fn calc_bond_force(atom: &AtomEntity, atom2: &AtomEntity) -> Vector3<f32> {
     let magnitude = calc_bond_force_magnitude(atom, atom2);
-    let vector = force_magnitude_to_vector(magnitude, atom.pos(), atom2.pos());
+    let vector =
+        force_magnitude_to_vector(magnitude, atom.instance.position, atom2.instance.position);
 
     vector
 }
 
-fn calc_bond_force_magnitude(atom1: &Atom, atom2: &Atom) -> f32 {
-    let k = calc_bond_k(atom1, atom2);
-    let length = atom1.pos().distance(atom2.pos());
-    let length_0 = calc_bond_l0(atom1, atom2);
+fn calc_bond_force_magnitude(atom1: &AtomEntity, atom2: &AtomEntity) -> f32 {
+    let k = calc_bond_k(&atom1.model, &atom2.model);
+    let length = atom1.instance.position.distance(atom2.instance.position);
+    println!("length: {:?}", length);
+    let length_0 = calc_bond_l0(&atom1.model, &atom2.model);
 
     // derivative of bond energy, which is k * (length - length_0).powi(2)
     // src (bond energy): https://youtu.be/Nd2SBfrsaw4?si=VkRbcnd1DaTaAVPK&t=107
