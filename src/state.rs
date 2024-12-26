@@ -587,6 +587,7 @@ fn generate_instances_bonds(mol: &Mol, atoms: &[AtomEntity]) -> Vec<BondEntity> 
                 velocity: Vector3::zero(),
                 acceleration: Vector3::zero(),
                 scale: Vector3::new(0.1, scale_y, 0.1),
+                damping: 1.,
             };
 
             BondEntity {
@@ -638,6 +639,7 @@ fn generate_instances_atoms(atoms: &[Atom]) -> Vec<AtomEntity> {
                 velocity: Vector3::zero(),
                 acceleration: Vector3::zero(),
                 scale: Vector3::new(0.3, 0.3, 0.3),
+                damping: 0.99,
             };
 
             AtomEntity {
@@ -883,6 +885,7 @@ mod test {
                     cgmath::Vector3::unit_z(),
                     cgmath::Deg(0.0),
                 ),
+                damping: 1.,
             },
         }
     }
