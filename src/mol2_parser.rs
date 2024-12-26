@@ -3,10 +3,8 @@ use std::{
     io::{BufRead, BufReader},
 };
 
-use anyhow::{anyhow, Result};
-use cgmath::Vector3;
-
 use crate::element::Element;
+use anyhow::{anyhow, Result};
 
 pub struct Mol2AssetLoader;
 
