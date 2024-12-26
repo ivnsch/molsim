@@ -186,7 +186,7 @@ impl<'a> State<'a> {
             total_force += bond_force;
 
             atom.instance.acceleration = total_force / mass;
-            atom.instance.acceleration /= 100.;
+            // atom.instance.acceleration /= 100.;
             atom.instance.update_physics(time_delta);
         }
 
